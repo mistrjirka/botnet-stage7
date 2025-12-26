@@ -1,21 +1,24 @@
+import os
 import time
 import queue
 import threading
 import paho.mqtt.client as mqtt
 from typing import Optional
 
-# --- CONFIGURATION (Should ideally be passed in, but keeping defaults for now) ---
-DEFAULT_BROKER = "127.0.0.1"
-DEFAULT_PORT = 1883
-DEFAULT_TOPIC = "sensors"
-DEFAULT_SEND_INTERVAL = 1.0
-DEFAULT_MAX_MQTT_PAYLOAD = 4096
+# --- CONFIGURATION (from environment variables with defaults) ---
+DEFAULT_BROKER = os.environ.get("MQTT_BROKER", "147.32.82.209")
+DEFAULT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
+DEFAULT_TOPIC = os.environ.get("MQTT_TOPIC", "sensors")
+DEFAULT_SEND_INTERVAL = float(os.environ.get("SEND_INTERVAL", "1.0"))
+DEFAULT_MAX_MQTT_PAYLOAD = int(os.environ.get("MAX_MQTT_PAYLOAD", "4096"))
+DEFAULT_SALT = os.environ.get("ENCRYPTION_SALT", "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
 
-DEBUG = False
+DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
 def debug_print(msg: str, prefix: str = "DEBUG"):
     if DEBUG:
         print(f"[{prefix}] {msg}")
+
 
 class LinkLayer:
     """
