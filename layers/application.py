@@ -60,11 +60,17 @@ class ApplicationLayer:
             
         elif msg_type_str == "response":
             output = kwargs.get("output", "")
-            # Response doesn't strict type, maybe echo original type? 
-            # For simplicity, we can use UNKNOWN or PING for Pong. 
-            # Or better: Response flag set.
-            mtype = MsgType.PING # Default or tracked
+            mtype = MsgType.PING  # Default for text responses
             payload = output.encode('utf-8')
+            flags = MessageFlags.RESPONSE
+            
+        elif msg_type_str == "file_response":
+            # Binary file response: <filename_len:1><filename:N><file_data:rest>
+            filename = kwargs.get("filename", "")
+            file_data = kwargs.get("file_data", b"")
+            mtype = MsgType.FILE_RESPONSE
+            filename_bytes = filename.encode('utf-8')
+            payload = bytes([len(filename_bytes)]) + filename_bytes + file_data
             flags = MessageFlags.RESPONSE
         else:
             return
@@ -108,6 +114,7 @@ class ApplicationLayer:
             elif msg.msg_type == MsgType.ID: cmd_str = "id"
             elif msg.msg_type == MsgType.COPY: cmd_str = "copy"
             elif msg.msg_type == MsgType.EXEC: cmd_str = "exec"
+            elif msg.msg_type == MsgType.FILE_RESPONSE: cmd_str = "file_response"
             
             # Decode target
             target_str = f"HASH_{msg.target_id_hash:04x}"
@@ -119,9 +126,7 @@ class ApplicationLayer:
             # Decode sender - try to reconstruct sensor_XXXX format
             def decode_node_id(node_hash: int) -> str:
                 """Decode uint16 ID back to original format if possible."""
-                # Check if it's a sensor ID (sensor_N where N < 65535)
                 if node_hash < 0xFFFF and node_hash != 0xFFFF:
-                    # Assume it's sensor_N format
                     return f"sensor_{node_hash}"
                 elif node_hash == 0xFFFF:
                     return "ALL"
@@ -130,14 +135,33 @@ class ApplicationLayer:
             
             sender_str = decode_node_id(msg.sender_id_hash)
             
-            parsed = {
-                "sender": sender_str,
-                "target": target_str,
-                "type": "response" if (msg.flags & MessageFlags.RESPONSE) else "command",
-                "cmd": cmd_str,
-                "arg": msg.payload.decode('utf-8', errors='ignore'),
-                "output": msg.payload.decode('utf-8', errors='ignore') # same payload for response
-            }
+            # Handle FILE_RESPONSE specially - extract binary data
+            if msg.msg_type == MsgType.FILE_RESPONSE:
+                # Payload format: <filename_len:1><filename:N><file_data:rest>
+                if len(msg.payload) < 1:
+                    return
+                filename_len = msg.payload[0]
+                if len(msg.payload) < 1 + filename_len:
+                    return
+                filename = msg.payload[1:1+filename_len].decode('utf-8', errors='ignore')
+                file_data = msg.payload[1+filename_len:]
+                
+                parsed = {
+                    "sender": sender_str,
+                    "target": target_str,
+                    "type": "file_response",
+                    "filename": filename,
+                    "file_data": file_data,  # Raw bytes!
+                }
+            else:
+                parsed = {
+                    "sender": sender_str,
+                    "target": target_str,
+                    "type": "response" if (msg.flags & MessageFlags.RESPONSE) else "command",
+                    "cmd": cmd_str,
+                    "arg": msg.payload.decode('utf-8', errors='ignore'),
+                    "output": msg.payload.decode('utf-8', errors='ignore')
+                }
             
             if self._receive_callback:
                 self._receive_callback(parsed)

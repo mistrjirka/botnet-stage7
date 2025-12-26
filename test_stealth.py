@@ -298,10 +298,10 @@ class TestStealthE2E:
         assert "uid=" in response["output"]
     
     def test_stealth_copy_small_file(self, stealth_test_client):
-        """Test file copy in stealth mode with download verification."""
-        test_content = "SECRET_DATA_12345_STEALTH"
+        """Test file copy in stealth mode with binary transfer verification."""
+        test_content = b"SECRET_DATA_12345_STEALTH"
         
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.txt') as f:
             f.write(test_content)
             temp_path = f.name
         
@@ -310,7 +310,6 @@ class TestStealthE2E:
         local_path = os.path.join(downloads_dir, filename)
         
         try:
-            # Clean up if exists from previous run
             if os.path.exists(local_path):
                 os.unlink(local_path)
             
@@ -318,24 +317,18 @@ class TestStealthE2E:
             response = stealth_test_client.wait_for_response(timeout=60)
             
             assert response is not None, "Should receive file copy response"
-            assert "FILE_START:" in response["output"]
-            assert test_content in response["output"], f"File content not found in: {response['output'][:100]}"
+            assert response.get("type") == "file_response"
+            assert response.get("filename") == filename
+            assert response.get("file_data") == test_content
             
-            # Simulate controller's file saving logic
-            lines = response["output"].split('\n', 1)
-            if len(lines) >= 2:
-                file_content = lines[1]
-                if file_content.endswith("\nFILE_END"):
-                    file_content = file_content[:-9]
-                
-                os.makedirs(downloads_dir, exist_ok=True)
-                with open(local_path, 'wb') as f:
-                    f.write(file_content.encode('utf-8'))
-                
-                # Verify saved file matches original
-                with open(local_path, 'r') as f:
-                    saved_content = f.read()
-                assert saved_content == test_content, "Saved file content should match original"
+            # Verify by saving to downloads
+            os.makedirs(downloads_dir, exist_ok=True)
+            with open(local_path, 'wb') as f:
+                f.write(response.get("file_data", b""))
+            
+            with open(local_path, 'rb') as f:
+                saved_content = f.read()
+            assert saved_content == test_content, "Saved file content should match original"
         finally:
             os.unlink(temp_path)
             if os.path.exists(local_path):

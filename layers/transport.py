@@ -163,8 +163,21 @@ class TransportLayer:
             debug_print(f"RX chunk error: {e}", "TRANSPORT")
 
     def _cleanup_old_entries(self):
+        """Clean up expired reassembly entries with dynamic timeout."""
         now = time.time()
-        timeout = 30
-        expired = [msg for msg, entry in self._reassembly_buffer.items() if now - entry["timestamp"] > timeout]
-        for msg in expired:
-            del self._reassembly_buffer[msg]
+        expired = []
+        
+        for msg_id, entry in self._reassembly_buffer.items():
+            # Calculate timeout based on total chunks:
+            # Expected time = total_chunks * send_interval (1s default)
+            # Add 3x margin for safety
+            total_chunks = entry.get("total", 1)
+            base_timeout = total_chunks * 1.0  # 1 second per chunk (send interval)
+            timeout = max(30, base_timeout * 3)  # 3x margin, minimum 30s
+            
+            if now - entry["timestamp"] > timeout:
+                expired.append(msg_id)
+        
+        for msg_id in expired:
+            debug_print(f"RX buffer expired: msg_id={msg_id:08x}", "TRANSPORT")
+            del self._reassembly_buffer[msg_id]

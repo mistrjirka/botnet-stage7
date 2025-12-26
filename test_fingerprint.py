@@ -290,20 +290,40 @@ class TestFileCopy:
     """Tests for file copy command."""
     
     def test_copy_small_file(self, test_client):
-        """Test copying a small file."""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
-            f.write("small file content")
+        """Test copying a small file with binary transfer."""
+        test_content = b"small file content"
+        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.txt') as f:
+            f.write(test_content)
             temp_path = f.name
         
+        filename = os.path.basename(temp_path)
+        downloads_dir = "downloads"
+        local_path = os.path.join(downloads_dir, filename)
+        
         try:
+            if os.path.exists(local_path):
+                os.unlink(local_path)
+                
             test_client.send_command("ALL", "copy", temp_path)
             response = test_client.wait_for_response(timeout=10)
             
             assert response is not None
-            assert "FILE_START:" in response["output"]
-            assert "small file content" in response["output"]
+            assert response.get("type") == "file_response", f"Expected file_response, got {response.get('type')}"
+            assert response.get("filename") == filename
+            assert response.get("file_data") == test_content
+            
+            # Verify by saving to downloads
+            os.makedirs(downloads_dir, exist_ok=True)
+            with open(local_path, 'wb') as f:
+                f.write(response.get("file_data", b""))
+            
+            with open(local_path, 'rb') as f:
+                saved_content = f.read()
+            assert saved_content == test_content, "Saved file should match original"
         finally:
             os.unlink(temp_path)
+            if os.path.exists(local_path):
+                os.unlink(local_path)
     
     def test_copy_nonexistent_file(self, test_client):
         """Test copying nonexistent file."""
@@ -315,9 +335,9 @@ class TestFileCopy:
     
     def test_copy_large_file(self, test_client):
         """Test copying a large file that requires chunking."""
-        large_content = "X" * 10000 + "\nEND_MARKER"
+        large_content = b"X" * 10000 + b"\nEND_MARKER"
         
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.txt') as f:
             f.write(large_content)
             temp_path = f.name
         
@@ -326,17 +346,17 @@ class TestFileCopy:
             response = test_client.wait_for_response(timeout=30)
             
             assert response is not None, "Should receive response for large file"
-            assert "FILE_START:" in response["output"]
-            assert "END_MARKER" in response["output"], "Should receive complete file"
+            assert response.get("type") == "file_response"
+            assert response.get("file_data") == large_content, "Should receive complete file"
         finally:
             os.unlink(temp_path)
     
     def test_copy_very_large_file(self, test_client):
         """Test copying a very large file (50KB+)."""
         content_parts = [f"LINE_{i:05d}:" + "Y" * 100 + "\n" for i in range(500)]
-        large_content = "".join(content_parts)
+        large_content = "".join(content_parts).encode('utf-8')
         
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.txt') as f:
             f.write(large_content)
             temp_path = f.name
         
@@ -345,9 +365,9 @@ class TestFileCopy:
             response = test_client.wait_for_response(timeout=120)
             
             assert response is not None, "Should receive response for very large file"
-            assert "FILE_START:" in response["output"]
-            assert "LINE_00000:" in response["output"], "Should have first line"
-            assert "LINE_00499:" in response["output"], "Should have last line"
+            assert response.get("type") == "file_response"
+            assert b"LINE_00000:" in response.get("file_data", b""), "Should have first line"
+            assert b"LINE_00499:" in response.get("file_data", b""), "Should have last line"
         finally:
             os.unlink(temp_path)
 

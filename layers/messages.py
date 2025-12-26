@@ -36,6 +36,7 @@ class MsgType(enum.IntEnum):
     ID = 0x04
     COPY = 0x05
     EXEC = 0x06
+    FILE_RESPONSE = 0x10  # Binary file transfer response
 
 class MessageFlags(enum.IntFlag):
     REQUEST = 0x00

