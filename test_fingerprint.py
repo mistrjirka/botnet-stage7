@@ -58,9 +58,10 @@ class TestClientHelper:
             salt=SALT,
             send_interval=0.5  # Faster for testing
         )
-        self.stack.application.on_receive(self._on_message) # Use app layer directly if needed, or stack wrapper
-        # Calculate my sender ID to ignore own messages
-        self.my_sender_id = f"HASH_{self.stack.application.my_hash:04x}"
+        self.stack.application.on_receive(self._on_message)
+        # Calculate my sender ID to ignore own messages (uses sensor_N format after decode)
+        my_hash = self.stack.application.my_hash
+        self.my_sender_id = f"sensor_{my_hash}" if my_hash < 0xFFFF else f"HASH_{my_hash:04x}"
         self.stack.on_receive(self._on_message)
     
     def _on_message(self, message: dict):

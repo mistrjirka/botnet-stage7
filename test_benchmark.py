@@ -41,7 +41,9 @@ class BenchmarkClientHelper:
             send_interval=1.0
         )
         self.stack.application.on_receive(self._on_message)
-        self.my_sender_id = f"HASH_{self.stack.application.my_hash:04x}"
+        # Calculate my sender ID to ignore own messages (uses sensor_N format after decode)
+        my_hash = self.stack.application.my_hash
+        self.my_sender_id = f"sensor_{my_hash}" if my_hash < 0xFFFF else f"HASH_{my_hash:04x}"
         self.stack.on_receive(self._on_message)
 
     def _on_message(self, message: dict):

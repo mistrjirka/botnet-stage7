@@ -44,20 +44,19 @@ class MessageFlags(enum.IntFlag):
     ERROR = 0x02
 
 class BinaryMessage:
-    # Flags(1), Target(2), Sender(2), Type(1)
-    HEADER_FORMAT = ">BHHB"
-    HEADER_SIZE = 6
+    # Flags(1), Target(2), Type(1) - Sender comes from lower layer (sensor_id)
+    HEADER_FORMAT = ">BHB"
+    HEADER_SIZE = 4
     
-    def __init__(self, target_id_hash: int, sender_id_hash: int, msg_type: int, flags: int, payload: bytes):
+    def __init__(self, target_id_hash: int, msg_type: int, flags: int, payload: bytes):
         self.target_id_hash = target_id_hash
-        self.sender_id_hash = sender_id_hash
         self.msg_type = msg_type
         self.flags = flags
         self.payload = payload
 
     def serialize(self) -> bytes:
         """Serialize message to bytes."""
-        header = struct.pack(self.HEADER_FORMAT, self.flags, self.target_id_hash, self.sender_id_hash, self.msg_type)
+        header = struct.pack(self.HEADER_FORMAT, self.flags, self.target_id_hash, self.msg_type)
         return header + self.payload
     
     @classmethod
@@ -67,9 +66,9 @@ class BinaryMessage:
              return None
         
         try:
-            flags, target, sender, mtype = struct.unpack(cls.HEADER_FORMAT, data[:cls.HEADER_SIZE])
+            flags, target, mtype = struct.unpack(cls.HEADER_FORMAT, data[:cls.HEADER_SIZE])
             payload = data[cls.HEADER_SIZE:]
-            return cls(target, sender, mtype, flags, payload)
+            return cls(target, mtype, flags, payload)
         except struct.error:
             return None
 

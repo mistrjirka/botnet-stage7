@@ -40,6 +40,7 @@ class ProtocolStack:
         self.transport.set_upper_layer(self.application)
         
         self.application.set_lower_layer(self.transport)
+        self.application._encryption_layer = self.encryption  # For sender access
     
     def start(self):
         """Start the protocol stack."""
@@ -93,6 +94,7 @@ class StealthProtocolStack:
         self.transport.set_upper_layer(self.application)
         
         self.application.set_lower_layer(self.transport)
+        self.application._encryption_layer = self.encryption  # For sender access
     
     def start(self):
         """Start the protocol stack."""

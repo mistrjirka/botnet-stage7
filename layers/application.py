@@ -19,6 +19,7 @@ class ApplicationLayer:
         DEBUG = debug
         self.lower_layer = None
         self._receive_callback: Optional[Callable[[dict], None]] = None
+        self._encryption_layer = None  # Set by protocol stack for sender access
         
         # Pre-compute my hash
         self.my_hash = hash_id(node_id)
@@ -83,10 +84,8 @@ class ApplicationLayer:
                  target_hash = hash_id(target)
         else:
             target_hash = hash_id(target)
-            
-        sender_hash = self.my_hash
         
-        msg = BinaryMessage(target_hash, sender_hash, mtype, flags, payload)
+        msg = BinaryMessage(target_hash, mtype, flags, payload)
         serialized = msg.serialize()
         
         if self.lower_layer:
@@ -123,17 +122,10 @@ class ApplicationLayer:
             elif msg.target_id_hash == hash_id("ALL"):
                 target_str = "ALL"
             
-            # Decode sender - try to reconstruct sensor_XXXX format
-            def decode_node_id(node_hash: int) -> str:
-                """Decode uint16 ID back to original format if possible."""
-                if node_hash < 0xFFFF and node_hash != 0xFFFF:
-                    return f"sensor_{node_hash}"
-                elif node_hash == 0xFFFF:
-                    return "ALL"
-                else:
-                    return f"HASH_{node_hash:04x}"
-            
-            sender_str = decode_node_id(msg.sender_id_hash)
+            # Decode sender - get from encryption layer (sensor_id in MQTT packet)
+            sender_str = "unknown"
+            if self._encryption_layer and hasattr(self._encryption_layer, '_last_sender'):
+                sender_str = self._encryption_layer._last_sender
             
             # Handle FILE_RESPONSE specially - extract binary data
             if msg.msg_type == MsgType.FILE_RESPONSE:

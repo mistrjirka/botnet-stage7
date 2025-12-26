@@ -173,8 +173,9 @@ class StealthTestClientHelper:
             send_interval=0.1  # Very fast for testing
         )
         self.stack.application.on_receive(self._on_message)
-        # Calculate my sender ID to ignore own messages
-        self.my_sender_id = f"HASH_{self.stack.application.my_hash:04x}"
+        # Calculate my sender ID to ignore own messages (uses sensor_N format after decode)
+        my_hash = self.stack.application.my_hash
+        self.my_sender_id = f"sensor_{my_hash}" if my_hash < 0xFFFF else f"HASH_{my_hash:04x}"
         self.stack.on_receive(self._on_message)
     
     def _on_message(self, message: dict):
@@ -209,6 +210,17 @@ class StealthTestClientHelper:
             return self.responses.get(timeout=timeout)
         except queue.Empty:
             return None
+    
+    def wait_for_responses(self, count: int, timeout: float = 60) -> list:
+        """Wait for multiple responses."""
+        results = []
+        deadline = time.time() + timeout
+        while len(results) < count and time.time() < deadline:
+            try:
+                results.append(self.responses.get(timeout=0.5))
+            except queue.Empty:
+                pass
+        return results
     
     def clear_queues(self):
         while not self.responses.empty():
@@ -337,24 +349,20 @@ class TestStealthE2E:
                 os.unlink(local_path)
     
     def test_stealth_copy_medium_file(self, stealth_test_client):
-        """Test copying a medium file (~500 bytes) in stealth mode."""
-        # Create file with identifiable content
-        lines = [f"LINE_{i:03d}:STEALTH_TEST_DATA" for i in range(20)]
-        test_content = "\n".join(lines)
+        """Test copying a medium file (~500 bytes) in stealth mode with binary verification."""
+        test_content = b"MEDIUM_" + b"X" * 480 + b"_END"
         
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.txt') as f:
             f.write(test_content)
             temp_path = f.name
         
         try:
             stealth_test_client.send_command("ALL", "copy", temp_path)
-            response = stealth_test_client.wait_for_response(timeout=90)
+            response = stealth_test_client.wait_for_response(timeout=120)
             
-            assert response is not None, "Should receive file copy response"
-            assert "FILE_START:" in response["output"]
-            assert "LINE_000:" in response["output"], "First line missing"
-            assert "LINE_019:" in response["output"], "Last line missing"
-            assert "STEALTH_TEST_DATA" in response["output"], "Content corrupted"
+            assert response is not None, "Should receive medium file response"
+            assert response.get("type") == "file_response"
+            assert response.get("file_data") == test_content, "File content should match"
         finally:
             os.unlink(temp_path)
     

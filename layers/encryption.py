@@ -112,6 +112,7 @@ class EncryptionLayer:
         DEBUG = debug
         self.lower_layer = None
         self.upper_layer = None
+        self._last_sender = ""  # Stores sender from last received packet
     
     def set_lower_layer(self, layer):
         self.lower_layer = layer
@@ -187,6 +188,9 @@ class EncryptionLayer:
         if "fingerprint" not in packet:
             return
         
+        # Store sender for upper layers to access
+        self._last_sender = packet.get("sensor_id", "")
+        
         key = self._derive_key(packet)
         decrypted = self._decrypt(packet["fingerprint"], key)
         
@@ -228,6 +232,7 @@ class StealthEncryptionLayer:
         self.lower_layer = None
         self.upper_layer = None
         self._xor_key = self._derive_xor_key()
+        self._last_sender = ""  # Stores sender from last received packet
     
     def set_lower_layer(self, layer):
         self.lower_layer = layer
@@ -328,6 +333,9 @@ class StealthEncryptionLayer:
             return
         
         debug_print(f"STEALTH RX: temp={packet.get('temp', 0):.3f} hum={packet.get('hum', 0):.3f}", "STEALTH")
+        
+        # Store sender for upper layers to access
+        self._last_sender = packet.get("sensor_id", "")
         
         try:
             encrypted = self._extract_payload_from_packet(packet)
