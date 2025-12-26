@@ -75,7 +75,9 @@ class TestClientHelper:
         if (sender.startswith("sensor_") or sender.startswith("HASH_")):
             self.discovered_bots.add(sender)
         
-        if message.get("type") == "response" and (message.get("target") == self.client_id or message.get("target") == "ME"):
+        msg_type = message.get("type")
+        target = message.get("target")
+        if msg_type in ("response", "file_response") and (target == self.client_id or target == "ME"):
             self.responses.put(message)
         else:
             print(f"DEBUG: Ignored message: type={message.get('type')}, target={message.get('target')}, sender={message.get('sender')}")

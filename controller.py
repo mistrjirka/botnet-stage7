@@ -69,9 +69,6 @@ def handle_message(message: dict):
     target = message.get("target")
     sender = message.get("sender")
     
-    # DEBUG: Show all incoming messages
-    print(f"\n[DEBUG] Msg recv: type={msg_type}, target={target}, sender={sender}, keys={list(message.keys())}")
-    
     # Track any bot that responds (but not ourselves)
     if sender and sender != CONTROLLER_ID and not sender.endswith("1"):
         discovered_bots.add(sender)

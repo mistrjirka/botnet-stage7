@@ -51,7 +51,7 @@ class BenchmarkClientHelper:
         if (sender.startswith("sensor_") or sender.startswith("HASH_")):
             self.discovered_bots.add(sender)
             
-        if message.get("type") == "response":
+        if message.get("type") in ("response", "file_response"):
             self.responses.put(message)
 
     def connect(self):
