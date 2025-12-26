@@ -193,24 +193,19 @@ class EncryptionLayer:
         packet = self._create_sensor_data()
         return serialize_packet(packet)
     
-    def send_from_above(self, payload: Union[dict, bytes]):
+    def send_from_above(self, payload: bytes):
+        """Send binary payload through fingerprint encryption."""
         packet = self._create_sensor_data()
         key = self._derive_key(packet)
         
-        if isinstance(payload, dict):
-            # Legacy JSON support for transitions or if needed
-            data = json.dumps(payload).encode()
-            prefixed = b'\x00' + data
-        else:
-            # Binary payload
-            prefixed = b'\x01' + payload
-            
-        packet["fingerprint"] = self._encrypt(prefixed, key)
+        # Direct binary payload - no TypeByte prefix
+        packet["fingerprint"] = self._encrypt(payload, key)
         
         if self.lower_layer:
             self.lower_layer.send_to_wire(serialize_packet(packet))
     
     def receive_from_below(self, packet_bytes: bytes):
+        """Receive and decrypt fingerprint to binary payload."""
         packet = deserialize_packet(packet_bytes)
         if "fingerprint" not in packet:
             return
@@ -222,18 +217,8 @@ class EncryptionLayer:
         decrypted = self._decrypt(packet["fingerprint"], key)
         
         if decrypted and self.upper_layer:
-            try:
-                type_byte = decrypted[0]
-                content = decrypted[1:]
-                
-                if type_byte == 0:
-                     payload = json.loads(content.decode())
-                else:
-                     payload = content 
-                     
-                self.upper_layer.receive_from_below(payload)
-            except:
-                pass
+            # Direct binary payload - no TypeByte prefix
+            self.upper_layer.receive_from_below(decrypted)
 
 class StealthEncryptionLayer:
     SENSOR_FIELDS = [
@@ -321,17 +306,11 @@ class StealthEncryptionLayer:
             packet[name] = round(random.uniform(min_val, max_val), 3)
         return serialize_packet(packet)
     
-    def send_from_above(self, payload: Union[dict, bytes]):
-        if isinstance(payload, dict):
-            # JSON payload
-            data = json.dumps(payload).encode()
-            prefixed_payload = b'\x00' + data
-        else:
-            # Binary payload
-            prefixed_payload = b'\x01' + payload
-            
-        length = len(prefixed_payload)
-        prefixed = length.to_bytes(2, 'big') + prefixed_payload
+    def send_from_above(self, payload: bytes):
+        """Send binary payload through stealth float encoding."""
+        # Direct binary - no TypeByte prefix
+        length = len(payload)
+        prefixed = length.to_bytes(2, 'big') + payload
         
         encrypted = self._xor_encrypt(prefixed)
         packet = self._create_sensor_data_with_payload(encrypted)
@@ -373,17 +352,11 @@ class StealthEncryptionLayer:
                  debug_print(f"STEALTH RX: invalid length {length}", "STEALTH")
                  return
                  
-            content = decrypted[2:2+length]
-            type_byte = content[0]
-            real_payload = content[1:]
-            
-            if type_byte == 0:
-                final_payload = json.loads(real_payload.decode())
-            else:
-                final_payload = real_payload
+            # Direct binary payload - no TypeByte prefix
+            payload = decrypted[2:2+length]
             
             if self.upper_layer:
-                self.upper_layer.receive_from_below(final_payload)
+                self.upper_layer.receive_from_below(payload)
                 
         except Exception as e:
             debug_print(f"Stealth RX Error: {e}", "STEALTH")

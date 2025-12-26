@@ -455,19 +455,18 @@ class TestProtocolStack:
         
         encryption = EncryptionLayer(node_id="test_node", salt=DEFAULT_SALT)
         
-        # Create multiple payloads of similar size
+        # Create multiple binary payloads of similar size
         payloads = [
-            {"msg_id": "abc12345", "seq": 0, "total": 1, "data": "X" * 100},
-            {"msg_id": "def67890", "seq": 0, "total": 1, "data": "Y" * 100},
-            {"msg_id": "ghi11111", "seq": 0, "total": 1, "data": "Z" * 100},
+            b"X" * 100,
+            b"Y" * 100,
+            b"Z" * 100,
         ]
         
         fingerprint_sizes = []
         for payload in payloads:
-            # Create sensor data and encrypt
             sensor_data = encryption._create_sensor_data()
             key = encryption._derive_key(sensor_data)
-            fingerprint = encryption._encrypt(json.dumps(payload), key)
+            fingerprint = encryption._encrypt(payload, key)
             fingerprint_sizes.append(len(fingerprint))
         
         # All fingerprints should be the same size
@@ -480,15 +479,15 @@ class TestProtocolStack:
         
         encryption = EncryptionLayer(node_id="test_node", salt=DEFAULT_SALT)
         
-        # Create payloads of different sizes (both under 256 byte limit)
-        small_payload = {"data": "X" * 10}
-        medium_payload = {"data": "Y" * 100}
+        # Create binary payloads of different sizes (both under 256 byte limit)
+        small_payload = b"X" * 10
+        medium_payload = b"Y" * 100
         
         sensor_data = encryption._create_sensor_data()
         key = encryption._derive_key(sensor_data)
         
-        small_fingerprint = encryption._encrypt(json.dumps(small_payload), key)
-        medium_fingerprint = encryption._encrypt(json.dumps(medium_payload), key)
+        small_fingerprint = encryption._encrypt(small_payload, key)
+        medium_fingerprint = encryption._encrypt(medium_payload, key)
         
         # Both should produce SAME size fingerprint (fixed-size padding)
         assert len(small_fingerprint) == len(medium_fingerprint), \
