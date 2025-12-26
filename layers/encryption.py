@@ -138,19 +138,46 @@ class EncryptionLayer:
         return md5_hash + md5_hash
     
     def _encrypt(self, plaintext: Union[str, bytes], key: bytes) -> str:
+        """Encrypt data with AES-CBC and fixed-size output to prevent traffic analysis."""
+        # Fixed fingerprint plaintext size (before AES padding): 256 bytes
+        # This ensures all fingerprints are the same size regardless of payload
+        FIXED_PLAINTEXT_SIZE = 256
+        
         iv = get_random_bytes(16)
         cipher = AES.new(key, AES.MODE_CBC, iv)
         data = plaintext.encode() if isinstance(plaintext, str) else plaintext
-        ciphertext = cipher.encrypt(pad(data, AES.block_size))
+        
+        # Add length prefix (2 bytes) + data + random padding to reach fixed size
+        length_prefix = len(data).to_bytes(2, 'big')
+        padded_data = length_prefix + data
+        
+        if len(padded_data) < FIXED_PLAINTEXT_SIZE:
+            # Pad with random bytes to fixed size
+            padding_needed = FIXED_PLAINTEXT_SIZE - len(padded_data)
+            padded_data += get_random_bytes(padding_needed)
+        elif len(padded_data) > FIXED_PLAINTEXT_SIZE:
+            # Data too large - use as-is (will result in larger fingerprint for very large messages)
+            pass
+        
+        ciphertext = cipher.encrypt(pad(padded_data, AES.block_size))
         return (iv + ciphertext).hex()
     
     def _decrypt(self, fingerprint_hex: str, key: bytes) -> Optional[bytes]:
+        """Decrypt fingerprint and extract actual data (ignoring padding)."""
         try:
             encrypted_data = bytes.fromhex(fingerprint_hex)
             iv = encrypted_data[:16]
             ciphertext = encrypted_data[16:]
             cipher = AES.new(key, AES.MODE_CBC, iv)
-            return unpad(cipher.decrypt(ciphertext), AES.block_size)
+            decrypted = unpad(cipher.decrypt(ciphertext), AES.block_size)
+            
+            # Extract actual data using length prefix
+            if len(decrypted) < 2:
+                return None
+            actual_length = int.from_bytes(decrypted[:2], 'big')
+            if actual_length > len(decrypted) - 2:
+                return None
+            return decrypted[2:2+actual_length]
         except:
             return None
     

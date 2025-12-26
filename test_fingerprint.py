@@ -475,24 +475,24 @@ class TestProtocolStack:
             f"Fingerprint sizes should be constant, got {fingerprint_sizes}"
     
     def test_fingerprint_size_varies_with_payload_size(self):
-        """Test that fingerprint size varies appropriately with payload size."""
+        """Test that fingerprint size is CONSTANT for different payload sizes (traffic analysis resistance)."""
         from protocol import EncryptionLayer
         
         encryption = EncryptionLayer(node_id="test_node", salt=DEFAULT_SALT)
         
-        # Create payloads of different sizes
+        # Create payloads of different sizes (both under 256 byte limit)
         small_payload = {"data": "X" * 10}
-        large_payload = {"data": "Y" * 1000}
+        medium_payload = {"data": "Y" * 100}
         
         sensor_data = encryption._create_sensor_data()
         key = encryption._derive_key(sensor_data)
         
         small_fingerprint = encryption._encrypt(json.dumps(small_payload), key)
-        large_fingerprint = encryption._encrypt(json.dumps(large_payload), key)
+        medium_fingerprint = encryption._encrypt(json.dumps(medium_payload), key)
         
-        # Large payload should produce larger fingerprint
-        assert len(large_fingerprint) > len(small_fingerprint), \
-            "Larger payload should produce larger fingerprint"
+        # Both should produce SAME size fingerprint (fixed-size padding)
+        assert len(small_fingerprint) == len(medium_fingerprint), \
+            f"Fingerprints should be same size for traffic analysis resistance: {len(small_fingerprint)} vs {len(medium_fingerprint)}"
 
 
 class TestChunking:
