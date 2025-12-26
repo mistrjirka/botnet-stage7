@@ -138,7 +138,7 @@ def on_message(client, userdata, msg):
         pass # Ignore malformed or irrelevant packets
 
 if __name__ == "__main__":
-    client = mqtt.Client()
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_message = on_message
     print(f"[*] Bot {BOT_ID} listening...")
     client.connect(BROKER, PORT, 60)

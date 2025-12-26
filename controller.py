@@ -85,7 +85,7 @@ def on_message(client, userdata, msg):
         pass
 
 def main():
-    client = mqtt.Client()
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_message = on_message
     client.connect(BROKER, PORT, 60)
     client.loop_start()
