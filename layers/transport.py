@@ -32,6 +32,10 @@ class TransportLayer:
         
         self._reassembly_buffer: Dict[int, dict] = {}
         self._buffer_lock = threading.Lock()
+        self._progress_cb = None
+    
+    def set_progress_callback(self, cb):
+        self._progress_cb = cb
     
     def set_lower_layer(self, layer):
         self.lower_layer = layer
@@ -96,6 +100,9 @@ class TransportLayer:
             progress = f"[{seq+1}/{total}]"
             debug_print(f"TX chunk {progress} msg_id={msg_id:08x} ({len(binary_chunk)}B)", "TRANSPORT")
             
+            if self._progress_cb:
+                self._progress_cb(msg_id, seq+1, total, "TX")
+            
             if self.lower_layer:
                 self.lower_layer.send_from_above(binary_chunk)
     
@@ -124,6 +131,9 @@ class TransportLayer:
             chunk_data = binary_data[8:]
             
             debug_print(f"RX chunk [{seq+1}/{total}] msg_id={msg_id:08x}", "TRANSPORT")
+            
+            if self._progress_cb:
+                self._progress_cb(msg_id, seq+1, total, "RX")
             
             with self._buffer_lock:
                 self._cleanup_old_entries()

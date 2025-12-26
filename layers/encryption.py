@@ -212,6 +212,10 @@ class StealthEncryptionLayer:
         ("light", 0.0, 1000.0),
         ("co2", 400.0, 2000.0),
         ("noise", 20.0, 80.0),
+        ("bat", 3.0, 4.2),        # Battery Voltage
+        ("wifi", -90.0, -30.0),   # Signal Strength (dBm)
+        ("pm25", 0.0, 500.0),     # PM2.5
+        ("pm10", 0.0, 500.0),     # PM10
     ]
     BYTES_PER_FLOAT = 4
     MAX_PAYLOAD_SIZE = len(SENSOR_FIELDS) * BYTES_PER_FLOAT

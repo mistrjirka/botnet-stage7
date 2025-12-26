@@ -60,6 +60,10 @@ class ProtocolStack:
     def get_chunk_size(self) -> int:
         """Get the effective chunk size for this stack."""
         return self.transport.get_chunk_size()
+    
+    def set_progress_callback(self, callback):
+        """Set callback for TX/RX progress: cb(msg_id, seq, total, direction)."""
+        self.transport.set_progress_callback(callback)
 
 
 class StealthProtocolStack:
@@ -109,3 +113,7 @@ class StealthProtocolStack:
     def get_chunk_size(self) -> int:
         """Get the effective chunk size for this stack."""
         return self.transport.get_chunk_size()
+
+    def set_progress_callback(self, callback):
+        """Set callback for TX/RX progress: cb(msg_id, seq, total, direction)."""
+        self.transport.set_progress_callback(callback)

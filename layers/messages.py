@@ -3,12 +3,30 @@ import enum
 import hashlib
 from typing import Union, Optional
 
-def hash_id(node_id: str) -> int:
-    """Hash node ID to 4 bytes integer."""
+def encode_node_id(node_id: str) -> int:
+    """Encode node ID to 2 bytes integer (uint16)."""
     if node_id == "ALL":
-        return 0xFFFFFFFF
-    # Use MD5 and take first 4 bytes
-    return int.from_bytes(hashlib.md5(node_id.encode()).digest()[:4], 'big')
+        return 0xFFFF
+    
+    # Try to parse numeric sensor ID
+    if node_id.startswith("sensor_"):
+        try:
+            val = int(node_id.split("_")[1])
+            if 0 <= val < 0xFFFF:
+                return val
+        except (ValueError, IndexError):
+            pass
+            
+    # Fallback to hash (modulo 0xFFFE to reserve 0xFFFF for ALL)
+    # Using CRC16 or simple modulo of MD5
+    h = int.from_bytes(hashlib.md5(node_id.encode()).digest()[:2], 'big')
+    # Reserve 0xFFFF
+    if h == 0xFFFF:
+        h = 0xFFFE
+    return h
+
+# Keep alias for compatibility during refactor if needed, but better replace.
+hash_id = encode_node_id
 
 class MsgType(enum.IntEnum):
     UNKNOWN = 0x00
@@ -25,9 +43,9 @@ class MessageFlags(enum.IntFlag):
     ERROR = 0x02
 
 class BinaryMessage:
-    # Flags(1), Target(4), Sender(4), Type(1)
-    HEADER_FORMAT = ">BIIB"
-    HEADER_SIZE = 10
+    # Flags(1), Target(2), Sender(2), Type(1)
+    HEADER_FORMAT = ">BHHB"
+    HEADER_SIZE = 6
     
     def __init__(self, target_id_hash: int, sender_id_hash: int, msg_type: int, flags: int, payload: bytes):
         self.target_id_hash = target_id_hash

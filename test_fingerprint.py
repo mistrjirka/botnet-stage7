@@ -60,7 +60,7 @@ class TestClientHelper:
         )
         self.stack.application.on_receive(self._on_message) # Use app layer directly if needed, or stack wrapper
         # Calculate my sender ID to ignore own messages
-        self.my_sender_id = f"HASH_{self.stack.application.my_hash:08x}"
+        self.my_sender_id = f"HASH_{self.stack.application.my_hash:04x}"
         self.stack.on_receive(self._on_message)
     
     def _on_message(self, message: dict):

@@ -92,20 +92,28 @@ class TestStealthMode:
         light = packet["light"]
         co2 = packet["co2"]
         noise = packet["noise"]
+        bat = packet["bat"]
+        wifi = packet["wifi"]
+        pm25 = packet["pm25"]
+        pm10 = packet["pm10"]
         
         # The integer part should be within expected ranges
-        # Note: encoding may slightly modify values, but they should still be finite floats
         assert 0 < temp < 100, f"temp {temp} should be reasonable"
         assert 0 < hum < 100, f"hum {hum} should be reasonable"
         assert 900 < pres < 1100, f"pres {pres} should be reasonable"
         assert -1000 < light < 2000, f"light {light} should be reasonable"
         assert 0 < co2 < 5000, f"co2 {co2} should be reasonable"
         assert 0 < noise < 150, f"noise {noise} should be reasonable"
+        assert 3.0 <= bat <= 4.21, f"bat {bat} should be reasonable"
+        assert -90.0 <= wifi <= -29.0, f"wifi {wifi} should be reasonable"
+        assert 0 <= pm25 <= 500.01, f"pm25 {pm25} should be reasonable"
+        assert 0 <= pm10 <= 500.01, f"pm10 {pm10} should be reasonable"
         
         # All values should be valid floats (not NaN or Inf)
         import math
         for name, val in [("temp", temp), ("hum", hum), ("pres", pres), 
-                         ("light", light), ("co2", co2), ("noise", noise)]:
+                         ("light", light), ("co2", co2), ("noise", noise),
+                         ("bat", bat), ("wifi", wifi), ("pm25", pm25), ("pm10", pm10)]:
             assert math.isfinite(val), f"{name} should be finite, got {val}"
     
     def test_stealth_placeholder_packet_has_no_fingerprint(self):
@@ -127,8 +135,8 @@ class TestStealthMode:
         
         layer = StealthEncryptionLayer(node_id="test_node", salt=DEFAULT_SALT)
         
-        # 6 fields * 4 bytes = 24 bytes. -3 overhead = 21 bytes.
-        assert layer.get_max_payload_size() == 21
+        # 10 fields * 4 bytes = 40 bytes. -3 overhead = 37 bytes.
+        assert layer.get_max_payload_size() == 37
     
     def test_stealth_protocol_stack_creation(self):
         """Test creating a stealth protocol stack."""
@@ -166,7 +174,7 @@ class StealthTestClientHelper:
         )
         self.stack.application.on_receive(self._on_message)
         # Calculate my sender ID to ignore own messages
-        self.my_sender_id = f"HASH_{self.stack.application.my_hash:08x}"
+        self.my_sender_id = f"HASH_{self.stack.application.my_hash:04x}"
         self.stack.on_receive(self._on_message)
     
     def _on_message(self, message: dict):
@@ -223,7 +231,7 @@ def stealth_bot_processes():
     # Make send interval very fast for testing
     bot_code = bot_code.replace('SEND_INTERVAL = 1.0', 'SEND_INTERVAL = 0.1')
     
-    for i in range(2):  # 2 stealth bots
+    for i in range(3):  # 3 stealth bots
         script_path = os.path.join(SCRIPT_DIR, f"_test_stealth_bot_{i}.py")
         test_scripts.append(script_path)
         
@@ -358,6 +366,56 @@ class TestStealthE2E:
         
         assert response is not None
         assert "stealth_exec" in response["output"]
+
+
+    def test_stealth_target_specific_bot(self, stealth_test_client):
+        """Test targeting a specific bot in stealth mode."""
+        # First discover bots
+        stealth_test_client.send_command("ALL", "ping")
+        # Wait for responses from ALL bots (we launched 3)
+        discovered_count = 0
+        start_wait = time.time()
+        while time.time() - start_wait < 30 and discovered_count < 3:
+             if stealth_test_client.wait_for_response(timeout=5):
+                 discovered_count += 1
+        
+        assert len(stealth_test_client.discovered_bots) >= 1, "No bots discovered"
+        target_bot = list(stealth_test_client.discovered_bots)[0]
+        
+        # Clear queues
+        stealth_test_client.clear_queues()
+        
+        # Send to specific bot
+        stealth_test_client.send_command(target_bot, "ping")
+        responses = []
+        start_time = time.time()
+        while time.time() - start_time < 30:
+            resp = stealth_test_client.wait_for_response(timeout=5)
+            if resp:
+                responses.append(resp)
+                if len(responses) >= 2: break # Should only get 1, but wait briefly to see if more come
+        
+        assert len(responses) == 1, f"Expected 1 response, got {len(responses)}"
+        assert responses[0]["sender"] == target_bot
+        
+    def test_stealth_wrong_target_ignored(self, stealth_test_client):
+        """Test that bots ignore commands not targeted at them."""
+        stealth_test_client.clear_queues()
+        
+        # Send to a non-existent target hash (2 bytes = 4 hex chars)
+        fake_target = "HASH_beef"
+        stealth_test_client.send_command(fake_target, "ping")
+        
+        response = stealth_test_client.wait_for_response(timeout=10)
+        assert response is None, "Should not receive response for wrong target"
+
+    def test_stealth_unknown_command(self, stealth_test_client):
+        """Test sending an unknown command in stealth mode."""
+        stealth_test_client.send_command("ALL", "not_a_command")
+        response = stealth_test_client.wait_for_response(timeout=30)
+        
+        assert response is not None
+        assert "Unknown Cmd" in response["output"]
 
 
 if __name__ == "__main__":

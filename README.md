@@ -22,19 +22,18 @@ graph TD
 ### 1. Fingerprint Mode (`USE_STEALTH_MODE=False`)
 - **Mechanism**: Standard AES-256-CBC encryption.
 - **Payload**: Encrypted data is placed in a dedicated `fingerprint` field within the JSON sensor packet.
-- **Sensor Data**: Randomly generated sensor values (temp, hum, bat) serve as camouflage but are not used for data transport.
+- **Bandwidth**: High (~3.5 KB/s at 1Hz).
 - **Security**: Relies on the obscurity of the `fingerprint` field.
 - **Pros**: Higher bandwidth, simpler implementation.
-- **Cons**: Easier to detect via traffic analysis (unexpected field).
+- **Cons**: Easier to detect via traffic analysis due to non-standard field.
 
 ### 2. Stealth Mode (`USE_STEALTH_MODE=True`)
-- **Mechanism**: Steganographic encoding into least significant bits (LSB) of float values.
+- **Mechanism**: Steganographic encoding into least significant bits of float values.
 - **Payload**: Data is XOR-encrypted and dispersed across standard sensor fields (`temp`, `hum`, `pres`, `light`, `co2`, `noise`).
-- **Encoding**: 4 bytes of data are embedded into the fraction part of each double-precision float.
-- **Sensor Data**: Acts as the carrier signal.
-- **Security**: Highly covert; traffic appears identical to legitimate sensor readings. No suspicious fields.
+- **Bandwidth**: Low (~37 B/s at 1Hz).
+- **Security**: Highly covert; traffic appears identical to legitimate sensor readings.
 - **Pros**: Extremely hard to detect.
-- **Cons**: Lower bandwidth (limited by number of sensor fields).
+- **Cons**: Low bandwidth; requires multiple packets for larger files.
 
 ## Configuration
 

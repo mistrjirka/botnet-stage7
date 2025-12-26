@@ -109,14 +109,14 @@ class ApplicationLayer:
             elif msg.msg_type == MsgType.COPY: cmd_str = "copy"
             elif msg.msg_type == MsgType.EXEC: cmd_str = "exec"
             
-            target_str = f"HASH_{msg.target_id_hash:08x}"
+            target_str = f"HASH_{msg.target_id_hash:04x}"
             if msg.target_id_hash == self.my_hash:
                 target_str = "ME"
             elif msg.target_id_hash == hash_id("ALL"):
                 target_str = "ALL"
             
             parsed = {
-                "sender": f"HASH_{msg.sender_id_hash:08x}",
+                "sender": f"HASH_{msg.sender_id_hash:04x}",
                 "target": target_str,
                 "type": "response" if (msg.flags & MessageFlags.RESPONSE) else "command",
                 "cmd": cmd_str,
