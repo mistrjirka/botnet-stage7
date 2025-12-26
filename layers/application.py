@@ -109,14 +109,29 @@ class ApplicationLayer:
             elif msg.msg_type == MsgType.COPY: cmd_str = "copy"
             elif msg.msg_type == MsgType.EXEC: cmd_str = "exec"
             
+            # Decode target
             target_str = f"HASH_{msg.target_id_hash:04x}"
             if msg.target_id_hash == self.my_hash:
                 target_str = "ME"
             elif msg.target_id_hash == hash_id("ALL"):
                 target_str = "ALL"
             
+            # Decode sender - try to reconstruct sensor_XXXX format
+            def decode_node_id(node_hash: int) -> str:
+                """Decode uint16 ID back to original format if possible."""
+                # Check if it's a sensor ID (sensor_N where N < 65535)
+                if node_hash < 0xFFFF and node_hash != 0xFFFF:
+                    # Assume it's sensor_N format
+                    return f"sensor_{node_hash}"
+                elif node_hash == 0xFFFF:
+                    return "ALL"
+                else:
+                    return f"HASH_{node_hash:04x}"
+            
+            sender_str = decode_node_id(msg.sender_id_hash)
+            
             parsed = {
-                "sender": f"HASH_{msg.sender_id_hash:04x}",
+                "sender": sender_str,
                 "target": target_str,
                 "type": "response" if (msg.flags & MessageFlags.RESPONSE) else "command",
                 "cmd": cmd_str,

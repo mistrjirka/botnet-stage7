@@ -86,7 +86,7 @@ python controller.py
 | `id` | User ID |
 | `ls <dir>` | List directory |
 | `exec <cmd>` | Run shell command |
-| `copy <file>` | Read file |
+| `copy <file>` | Download file to `downloads/` directory |
 | `list` | Show discovered bots |
 | `@sensor_XXXX <cmd>` | Target specific bot |
 

