@@ -146,11 +146,20 @@ if __name__ == "__main__":
     
     import sys
 
+    # Track TX message IDs to filter echoes
+    tx_message_ids = set()
+
     def progress_handler(msg_id, seq, total, direction):
         """Render progress bar."""
-        # Only show for multi-chunk or if preferred, but user asked for "even non debug mode".
-        # But for 1/1 chunks, it might flicker fast.
-        # Let's show for all.
+        # Track TX messages
+        if direction == "TX":
+            tx_message_ids.add(msg_id)
+        
+        # Skip RX progress for echoed TX messages (MQTT echo)
+        if direction == "RX" and msg_id in tx_message_ids:
+            if seq == total:
+                tx_message_ids.discard(msg_id)  # Clean up
+            return
         
         # Determine bar width
         bar_len = 20
