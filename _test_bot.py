@@ -7,7 +7,7 @@ import random
 from protocol import ProtocolStack
 
 # --- CONFIGURATION ---
-BROKER = "147.32.82.209"
+BROKER = "127.0.0.1"
 PORT = 1883
 TOPIC = "sensors"
 SALT = "S4ur0ns_S3cr3t_S4lt_2025"
