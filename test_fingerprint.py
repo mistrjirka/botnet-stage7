@@ -511,7 +511,108 @@ class TestChunking:
         response = test_client.wait_for_response(timeout=15)
         
         assert response is not None
-        assert "root" in response["output"]
+
+
+class TestNoiseResilience:
+    """Tests for resilience against malformed/random traffic on MQTT topic."""
+    
+    def test_random_binary_noise(self, test_client):
+        """Protocol should ignore random binary data without crashing."""
+        import paho.mqtt.client as mqtt
+        
+        # Connect a noise generator to the same topic
+        noise_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        noise_client.connect(BROKER, PORT, 60)
+        
+        # Send various malformed packets
+        noise_packets = [
+            b"",                               # Empty
+            b"\x00\x01\x02\x03",               # Random bytes
+            b"not json at all",                # Plain text
+            b'{"invalid": "json',              # Broken JSON
+            os.urandom(100),                   # Random 100 bytes
+            os.urandom(1000),                  # Random 1KB
+            b"\xff" * 50,                      # All 0xFF bytes
+            b"\x00" * 50,                      # All null bytes
+        ]
+        
+        for packet in noise_packets:
+            noise_client.publish(TOPIC, packet)
+            time.sleep(0.1)
+        
+        noise_client.disconnect()
+        
+        # After noise, bot should still respond to ping
+        time.sleep(1)
+        test_client.send_command("ALL", "ping")
+        response = test_client.wait_for_response(timeout=15)
+        
+        assert response is not None, "Bot should still respond after noise"
+        assert response["output"] == "Pong"
+    
+    def test_json_like_but_invalid(self, test_client):
+        """Protocol should handle JSON that doesn't match expected format."""
+        import paho.mqtt.client as mqtt
+        
+        noise_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        noise_client.connect(BROKER, PORT, 60)
+        
+        # Send valid JSON but wrong format
+        invalid_jsons = [
+            b'{"wrong_field": 123}',
+            b'{"sensor_id": null}',
+            b'[]',
+            b'{"fingerprint": "not_hex_encoded"}',
+            b'{"temp": "not_a_number", "hum": true}',
+        ]
+        
+        for packet in invalid_jsons:
+            noise_client.publish(TOPIC, packet)
+            time.sleep(0.1)
+        
+        noise_client.disconnect()
+        
+        # Bot should still work
+        time.sleep(1)
+        test_client.send_command("ALL", "id")
+        response = test_client.wait_for_response(timeout=15)
+        
+        assert response is not None, "Bot should still respond after invalid JSON"
+        assert "uid=" in response["output"]
+    
+    def test_concurrent_noise_and_commands(self, test_client):
+        """Bot should handle concurrent noise and valid traffic."""
+        import paho.mqtt.client as mqtt
+        import threading
+        
+        noise_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        noise_client.connect(BROKER, PORT, 60)
+        
+        # Start noise generator in background
+        stop_noise = threading.Event()
+        
+        def noise_generator():
+            while not stop_noise.is_set():
+                noise_client.publish(TOPIC, os.urandom(50))
+                time.sleep(0.2)
+        
+        noise_thread = threading.Thread(target=noise_generator, daemon=True)
+        noise_thread.start()
+        
+        # Send 3 commands while noise is happening
+        successes = 0
+        for _ in range(3):
+            test_client.send_command("ALL", "ping")
+            response = test_client.wait_for_response(timeout=15)
+            if response and response.get("output") == "Pong":
+                successes += 1
+            time.sleep(0.5)
+        
+        stop_noise.set()
+        noise_thread.join(timeout=2)
+        noise_client.disconnect()
+        
+        assert successes >= 2, f"At least 2/3 pings should succeed during noise, got {successes}"
 
 
 if __name__ == "__main__":

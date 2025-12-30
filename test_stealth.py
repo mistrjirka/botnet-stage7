@@ -478,5 +478,69 @@ class TestStealthE2E:
         assert response is not None
 
 
+class TestNoiseResilience:
+    """Tests for stealth mode resilience against malformed traffic."""
+    
+    def test_random_binary_noise(self, stealth_test_client):
+        """Stealth protocol should ignore random binary data."""
+        import paho.mqtt.client as mqtt
+        
+        noise_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        noise_client.connect(BROKER, PORT, 60)
+        
+        # Send various malformed packets
+        noise_packets = [
+            b"",                              
+            b"\x00\x01\x02\x03",              
+            b"not json at all",               
+            os.urandom(100),                  
+            os.urandom(152),  # Same size as stealth packet
+            b"\xff" * 50,                     
+        ]
+        
+        for packet in noise_packets:
+            noise_client.publish(TOPIC, packet)
+            time.sleep(0.2)
+        
+        noise_client.disconnect()
+        
+        # Bot should still respond
+        time.sleep(2)
+        stealth_test_client.send_command("ALL", "ping")
+        response = stealth_test_client.wait_for_response(timeout=30)
+        
+        assert response is not None, "Bot should still respond after noise"
+        assert response["output"] == "Pong"
+    
+    def test_fake_sensor_packets(self, stealth_test_client):
+        """Stealth protocol should ignore fake sensor data without fingerprint."""
+        import paho.mqtt.client as mqtt
+        from layers.encryption import serialize_packet
+        
+        noise_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        noise_client.connect(BROKER, PORT, 60)
+        
+        # Fake sensor packets that look real but have no hidden data
+        for i in range(5):
+            fake_packet = {
+                "sensor_id": f"fake_{i}",
+                "temp": 22.5,
+                "hum": 55.0,
+                "pres": 1013.25,
+            }
+            noise_client.publish(TOPIC, serialize_packet(fake_packet))
+            time.sleep(0.5)
+        
+        noise_client.disconnect()
+        
+        # Bot should still work
+        time.sleep(2)
+        stealth_test_client.send_command("ALL", "id")
+        response = stealth_test_client.wait_for_response(timeout=30)
+        
+        assert response is not None, "Bot should respond after fake sensor noise"
+        assert "uid=" in response["output"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
